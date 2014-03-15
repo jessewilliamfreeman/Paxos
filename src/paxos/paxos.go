@@ -43,10 +43,15 @@ type Paxos struct {
   agreements map[int]interface{}
   maxPrepare int
   maxAccept int
-  maxAcceptValue interface{}
+  maxAcceptValue *Proposal
   doneValue int
   max int
   // Your data here.
+}
+
+type Proposal struct {
+  Seq int
+  Value interface{}
 }
 
 type PrepareArgs struct {
@@ -55,13 +60,13 @@ type PrepareArgs struct {
 
 type PrepareReply struct {
   N int
-  Value interface{}
+  Value *Proposal
   Success bool
 }
 
 type AcceptArgs struct {
   N int
-  Value interface{}
+  Value *Proposal
 }
 
 type AcceptReply struct {
@@ -70,8 +75,7 @@ type AcceptReply struct {
 }
 
 type DecideArgs struct {
-  N int
-  Value interface{}
+  Value *Proposal
 }
 
 type DecideReply struct {
@@ -128,21 +132,19 @@ func call(srv string, name string, args interface{}, reply interface{}) bool {
 func (px *Paxos) Prepare(args *PrepareArgs, reply *PrepareReply) error {
   px.mu.Lock()
   defer px.mu.Unlock()
-  for key := range px.agreements {
-    if key == args.N {
-	  reply.N = key
-	  reply.Value = px.agreements[key]
-	  reply.Success = true
-	  return nil
-	}
-  }
-  if args.N < px.doneValue {
+//  for key := range px.agreements {
+//    if key == args.N {
+//	  reply.N = key
+//	  reply.Value = px.agreements[key]
+//	  reply.Success = true
+//	  return nil
+//	}
+//  }
+  if args.N <= px.maxPrepare {
     reply.Success = false
 	return nil
   } else {
-    if args.N > px.maxAccept {
-      px.maxPrepare = args.N
-	}
+    px.maxPrepare = args.N
 	reply.N = px.maxAccept
 	reply.Value = px.maxAcceptValue
 	reply.Success = true
@@ -153,21 +155,19 @@ func (px *Paxos) Prepare(args *PrepareArgs, reply *PrepareReply) error {
 func (px *Paxos) Accept(args *AcceptArgs, reply *AcceptReply) error {
   px.mu.Lock()
   defer px.mu.Unlock()
-  for key := range px.agreements {
-    if key == args.N {
-	  reply.N = px.maxAccept
-	  reply.Success = true
-	}
-  }
-  if args.N < px.doneValue {
+//  for key := range px.agreements {
+//    if key == args.N {
+//	  reply.N = px.maxAccept
+//	  reply.Success = true
+//	}
+//  }
+  if args.N < px.maxPrepare {
     reply.Success = false
 	return nil
   } else {
-    if args.N > px.maxAccept {
-      px.maxPrepare = args.N
-	  px.maxAccept = args.N
-	  px.maxAcceptValue = args.Value
-	}
+    px.maxPrepare = args.N
+	px.maxAccept = args.N
+	px.maxAcceptValue = args.Value
 	reply.N = px.maxAccept
 	reply.Success = true
 	return nil
@@ -177,7 +177,7 @@ func (px *Paxos) Accept(args *AcceptArgs, reply *AcceptReply) error {
 func (px *Paxos) Decide(args *DecideArgs, reply *DecideReply) error {
   px.mu.Lock()
   defer px.mu.Unlock()
-  px.agreements[args.N] = args.Value
+  px.agreements[args.Value.Seq] = args.Value.Value
   reply.Success = true
   return nil
 }
@@ -197,18 +197,19 @@ func (px *Paxos) Start(seq int, v interface{}) {
   //  notDecided = false
   //	}
   //}
-  if (seq > px.doneValue && seq > px.Max() && notDecided && !(px.dead)) {
+  if (seq > px.doneValue && notDecided && !(px.dead)) {
     go func() {
       // fmt.Println(seq)
 	  // fmt.Println(v)
 	  notDecided := true
-	  proposerValue := seq
-	  for notDecided {
+	  proposerN := px.maxPrepare + 1
+	  proposerValue := &Proposal{seq, v}
+	  for notDecided && !(px.dead) {
         props_acpted := 0
 	    values := map[int]PrepareReply{}
         for key, server := range px.peers {
   	      args := &PrepareArgs{}
-	      args.N = proposerValue
+	      args.N = proposerN
           var reply PrepareReply
 	      reply.Success = false
 	      if key == px.me {
@@ -224,19 +225,19 @@ func (px *Paxos) Start(seq int, v interface{}) {
 	    if props_acpted >= (len(px.peers) / 2) {
 	      // fmt.Println(seq)
 	      // fmt.Println(v)
-	      acceptn := proposerValue
-	      acceptvalue := v
+	      acceptN := proposerN
+	      acceptValue := proposerValue
 	      for _, value := range values {
-	        if value.N >= acceptn {
-		      acceptn = value.N
-		      acceptvalue = value.Value
+	        if value.N >= acceptN {
+		      acceptN = value.N
+		      acceptValue = value.Value
 		    }
 	      }
 	      acpts := 0
 	      for key , server := range px.peers {
 	        args := &AcceptArgs{}
-	        args.N = proposerValue
-	        args.Value = acceptvalue
+	        args.N = acceptN
+	        args.Value = acceptValue
             var reply AcceptReply
 		    reply.Success = false
 		    if key == px.me {
@@ -251,8 +252,7 @@ func (px *Paxos) Start(seq int, v interface{}) {
 	      if acpts >= (len(px.peers) / 2) {
 	        for key , server := range px.peers {
 		      args := &DecideArgs{}
-		      args.N = proposerValue
-	          args.Value = acceptvalue
+	          args.Value = acceptValue
               var reply DecideReply
 		      reply.Success = false
 		      if key == px.me {
@@ -261,22 +261,19 @@ func (px *Paxos) Start(seq int, v interface{}) {
 	            call(server, "Paxos.Decide", args, &reply)
 		      }
 		    }
-			if px.max < proposerValue {
-			  px.max = proposerValue
-			}
 			notDecided = false
           } else {
-		    if proposerValue < px.maxAccept {
-			  proposerValue = px.maxAccept + 1
+		    if proposerN < px.maxAccept {
+			  proposerN = px.maxAccept + 1
 			} else {
-		      proposerValue++
+		      proposerN++
 			}
 		  }
 		} else {
-		  if proposerValue < px.maxAccept {
-			proposerValue = px.maxAccept + 1
+		  if proposerN < px.maxAccept {
+			proposerN = px.maxAccept + 1
 	      } else {
-		    proposerValue++
+		    proposerN++
 		  }
 		}
 	  }
@@ -312,7 +309,13 @@ func (px *Paxos) Done(seq int) {
 // this peer.
 //
 func (px *Paxos) Max() int {
-  return px.max
+  max := -1
+  for key, _  := range px.agreements {
+    if key > max {
+	  max = key
+	}
+  }
+  return max
 }
 
 func (px *Paxos) RequestMin(args *MinArgs, reply *MinReply) error {
