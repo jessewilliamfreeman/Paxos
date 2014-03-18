@@ -142,6 +142,7 @@ func (px *Paxos) Prepare(args *PrepareArgs, reply *PrepareReply) error {
 //  }
   if args.N <= px.maxPrepare {
     reply.Success = false
+	reply.N = px.maxPrepare
 	return nil
   } else {
     px.maxPrepare = args.N
@@ -179,6 +180,15 @@ func (px *Paxos) Decide(args *DecideArgs, reply *DecideReply) error {
   defer px.mu.Unlock()
   px.agreements[args.Value.Seq] = args.Value.Value
   reply.Success = true
+  go func() {
+    decided := []string
+    for key, server := range px.peers {
+	  decided[key] = server
+	}
+	for args.Value.Seq > px.min && !(px.dead) {
+	  for 
+	}
+  }()
   return nil
 }
 
@@ -222,7 +232,8 @@ func (px *Paxos) Start(seq int, v interface{}) {
 	        props_acpted += 1
 	      }
         }
-	    if props_acpted >= (len(px.peers) / 2) {
+		// fmt.Println(len(px.peers))
+	    if props_acpted >= (len(px.peers) / 2) + 1 {
 	      // fmt.Println(seq)
 	      // fmt.Println(v)
 	      acceptN := proposerN
@@ -249,7 +260,7 @@ func (px *Paxos) Start(seq int, v interface{}) {
 		      acpts += 1
 		    }
           }
-	      if acpts >= (len(px.peers) / 2) {
+	      if acpts >= (len(px.peers) / 2) + 1{
 	        for key , server := range px.peers {
 		      args := &DecideArgs{}
 	          args.Value = acceptValue
