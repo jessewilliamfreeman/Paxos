@@ -63,6 +63,7 @@ func TestBasic(t *testing.T) {
   fmt.Printf("Test: Basic put/puthash/get ...\n")
 
   pv := ck.PutHash("a", "x")
+  check(t, ck, "a", "x")
   ov := ""
   if ov != pv {
     t.Fatalf("wrong value; expected %s got %s", ov, pv)

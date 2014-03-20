@@ -10,6 +10,7 @@ type Err string
 
 type PutArgs struct {
   // You'll have to add definitions here.
+  Name string
   Key string
   Value string
   DoHash bool  // For PutHash
@@ -21,9 +22,11 @@ type PutArgs struct {
 type PutReply struct {
   Err Err
   PreviousValue string   // For PutHash
+  Success bool
 }
 
 type GetArgs struct {
+  Name string
   Key string
   // You'll have to add definitions here.
 }
@@ -31,6 +34,7 @@ type GetArgs struct {
 type GetReply struct {
   Err Err
   Value string
+  Success bool
 }
 
 func hash(s string) uint32 {

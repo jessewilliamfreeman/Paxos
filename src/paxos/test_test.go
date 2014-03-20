@@ -451,7 +451,6 @@ func TestRPCCount(t *testing.T) {
     // fmt.Println(pxa[j].rpcCount)
     total1 += pxa[j].rpcCount
   }
-  
   // per agreement:
   // 3 prepares
   // 3 accepts
@@ -468,6 +467,7 @@ func TestRPCCount(t *testing.T) {
       go pxa[j].Start(seq, j + (i * 10))
     }
     waitn(t, pxa, seq, npaxos)
+	fmt.Println("duuder")
     seq++
   }
 
@@ -475,6 +475,7 @@ func TestRPCCount(t *testing.T) {
 
   total2 := 0
   for j := 0; j < npaxos; j++ {
+    fmt.Println("duuder")
     total2 += pxa[j].rpcCount
   }
   total2 -= total1

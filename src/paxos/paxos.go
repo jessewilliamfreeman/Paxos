@@ -29,7 +29,7 @@ import "sync"
 import "fmt"
 import "math/rand"
 
-
+import "time"
 
 type Paxos struct {
   mu sync.Mutex
@@ -46,6 +46,7 @@ type Paxos struct {
   maxAcceptValue *Proposal
   doneValue int
   max int
+  proposeAllow bool
   // Your data here.
 }
 
@@ -140,7 +141,7 @@ func (px *Paxos) Prepare(args *PrepareArgs, reply *PrepareReply) error {
 //	  return nil
 //	}
 //  }
-  if args.N <= px.maxPrepare {
+  if args.N <= px.maxPrepare || !(px.proposeAllow) {
     reply.Success = false
 	reply.N = px.maxPrepare
 	return nil
@@ -162,7 +163,7 @@ func (px *Paxos) Accept(args *AcceptArgs, reply *AcceptReply) error {
 //	  reply.Success = true
 //	}
 //  }
-  if args.N < px.maxPrepare {
+  if args.N < px.maxPrepare || !(px.proposeAllow){
     reply.Success = false
 	return nil
   } else {
@@ -171,6 +172,11 @@ func (px *Paxos) Accept(args *AcceptArgs, reply *AcceptReply) error {
 	px.maxAcceptValue = args.Value
 	reply.N = px.maxAccept
 	reply.Success = true
+	go func() {
+	  px.proposeAllow = false
+	  time.Sleep(10 * time.Millisecond)
+	  px.proposeAllow = true
+	}()
 	return nil
   } 
 } 
@@ -181,17 +187,34 @@ func (px *Paxos) Decide(args *DecideArgs, reply *DecideReply) error {
   px.agreements[args.Value.Seq] = args.Value.Value
   reply.Success = true
   go func() {
-    decided := []string
+    decided := map[int]string{}
     for key, server := range px.peers {
 	  decided[key] = server
 	}
-	for args.Value.Seq > px.min && !(px.dead) {
-	  for 
+	for !(px.dead) && args.Value.Seq >= px.doneValue && px.agreements[args.Value.Seq] == args.Value.Value {
+	  for key, server := range px.peers {
+	    if _, ok := decided[key]; !(ok) {
+		  var reply DecideReply
+		  call(server, "Paxos.Decide", args, &reply)
+		  decided[key] = server
+		}
+	  }
+	  time.Sleep(10 * time.Millisecond)
 	}
   }()
   return nil
 }
 
+func (px *Paxos) forceDecide(server string, args *DecideArgs, reply *DecideReply) {
+  go func() {
+    fmt.Println(server)
+    responce := false
+    for !(responce) && !(px.dead) && args.Value.Seq >= px.doneValue {
+      responce = call(server, "Paxos.Decide", args, reply)
+      time.Sleep(10 * time.Millisecond)
+    }
+  }()
+}
 
 //
 // the application wants paxos to start agreement on
@@ -201,20 +224,23 @@ func (px *Paxos) Decide(args *DecideArgs, reply *DecideReply) error {
 // is reached.
 //
 func (px *Paxos) Start(seq int, v interface{}) {
-  notDecided := true
+//  notDecided := true
   // for key, _ := range px.agreements {
   //  if key == seq {
   //  notDecided = false
   //	}
   //}
-  if (seq > px.doneValue && notDecided && !(px.dead)) {
+  if (!(px.dead)) {
     go func() {
       // fmt.Println(seq)
 	  // fmt.Println(v)
 	  notDecided := true
 	  proposerN := px.maxPrepare + 1
 	  proposerValue := &Proposal{seq, v}
-	  for notDecided && !(px.dead) {
+	  for seq > px.doneValue && notDecided && !(px.dead) {
+	    if _,ok := px.agreements[seq]; ok {
+          break
+		}
         props_acpted := 0
 	    values := map[int]PrepareReply{}
         for key, server := range px.peers {
@@ -269,7 +295,18 @@ func (px *Paxos) Start(seq int, v interface{}) {
 		      if key == px.me {
 		        px.Decide(args, &reply)
 		      } else {
-	            call(server, "Paxos.Decide", args, &reply)
+			    ok := call(server, "Paxos.Decide", args, &reply)
+				if !(ok) {
+				  px.forceDecide("" + server, args, &reply)
+//			      go func forceDecide (*String server) {
+//				    fmt.Println(server)
+//				    responce := false
+//				    for !(responce) && !(px.dead) && seq >= px.doneValue {
+//	                  responce = call(newServer, "Paxos.Decide", args, &reply)
+//					  time.Sleep(10 * time.Millisecond)
+//			        }
+//				  }(&server)
+				}
 		      }
 		    }
 			notDecided = false
@@ -302,10 +339,10 @@ func (px *Paxos) Done(seq int) {
   px.mu.Lock()
   defer px.mu.Unlock()
   dn := seq
-//  mn := px.Min()
-//  if seq > mn {
-//    dn = mn
-//  }
+  mn := px.Min()
+  if seq > mn {
+    dn = mn
+  }
   for key, _ := range px.agreements {
     if key <= dn {
 	  delete(px.agreements, key)
@@ -325,6 +362,9 @@ func (px *Paxos) Max() int {
     if key > max {
 	  max = key
 	}
+  }
+  if max == -1 {
+    return px.doneValue + 1
   }
   return max
 }
@@ -439,6 +479,7 @@ func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
   px.maxAccept = -1
   px.doneValue = -1
   px.max = -1
+  px.proposeAllow = true
   
   if rpcs != nil {
     // caller will create socket &c

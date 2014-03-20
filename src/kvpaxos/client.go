@@ -2,9 +2,13 @@ package kvpaxos
 
 import "net/rpc"
 import "fmt"
+import "math/rand"
+import "strconv"
+// import "time"
 
 type Clerk struct {
   servers []string
+  name string
   // You will have to modify this struct.
 }
 
@@ -12,6 +16,7 @@ type Clerk struct {
 func MakeClerk(servers []string) *Clerk {
   ck := new(Clerk)
   ck.servers = servers
+  ck.name = strconv.FormatInt(rand.Int63(),10)
   // You'll have to add code here.
   return ck
 }
@@ -56,7 +61,20 @@ func call(srv string, rpcname string,
 //
 func (ck *Clerk) Get(key string) string {
   // You will have to modify this function.
-  return ""
+  args := &GetArgs{}
+  args.Name = ck.name + strconv.FormatInt(rand.Int63(),10)
+  args.Key = key
+  for {
+    for _,server := range ck.servers {
+	  var reply GetReply
+	  ok := call(server, "KVPaxos.Get", args, &reply)
+//	  time.Sleep(time.Second)
+//	  fmt.Println(reply)
+	  if ok  {
+	    return reply.Value
+	  }
+	}
+  }
 }
 
 //
@@ -65,7 +83,25 @@ func (ck *Clerk) Get(key string) string {
 //
 func (ck *Clerk) PutExt(key string, value string, dohash bool) string {
   // You will have to modify this function.
-  return ""
+  args := &PutArgs{}
+  args.Name = ck.name + strconv.FormatInt(rand.Int63(),10)
+  args.Key = key
+  args.Value = value
+//  fmt.Println(value)
+  for {
+    for _,server := range ck.servers {
+	  var reply PutReply
+	  ok := call(server, "KVPaxos.Put", args, &reply)
+//	  time.Sleep(time.Second)
+	  if ok {
+//	    fmt.Println(key)
+	    if dohash {
+	      return reply.PreviousValue
+		}
+		return ""
+	  }
+	}
+  }
 }
 
 func (ck *Clerk) Put(key string, value string) {
